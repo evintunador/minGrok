@@ -16,7 +16,7 @@ This repo is meant as a guide to how XAI's newly open-sourced model Grok-1 works
 
 ### ToDo
 - [ ] A commenter pointed out my lack of inclusion of MoE specific training dynamics. Basically in order to encourage proper expert utilization rather than over-reliance on one expert, you need to both add randomness to the Router's logits and add a diversity loss to ensure every expert is used in every batch. The video will not be changing but fingers crossed I'll be able update the code today. Should be a good little test if you've actually read the code.
-- [ ] Grok's FFN inner-dimension multiplier is actually effectively 5.33. Very odd way they set that up on their part which is why i missed it but anyways I also plan to fix that this afternoon
+- [x] ~~Grok's FFN inner-dimension multiplier is actually effectively 5.33. Very odd way they set that up on their part which is why i missed it but anyways I also plan to fix that this afternoon~~
 
 ### Check out my socials
 - [Youtube](https://www.youtube.com/channel/UCeQhm8DwHBg_YEYY0KGM1GQ)
