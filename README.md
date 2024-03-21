@@ -2,7 +2,7 @@
 
 This repo is meant as a guide to how XAI's newly open-sourced model Grok-1 works. To see their original implementation, [click here](https://github.com/xai-org/grok-1). To find the googel colab notebook that walks through the architecture in *excruciating* detail as a demonstration for beginners, [click here](https://colab.research.google.com/drive/1o3RV23gIDVcfkxgTe2jnbLTKVyYuZTMM?usp=sharing) and check out my youtube video where I walk through it below. If you're not a beginner (already knowledgeable about decoder-only transformers) then I recommend skimming through `model.py` and `config.py` to see all the ways in which Grok-1 differs from other open-source models like Llama, Mistral and Gemma.
 
-[![ERROR DISPLAYING IMAGE, CLICK HERE FOR VIDEO](https://img.youtube.com/vi/WW7ZxaC3OtA/0.jpg)](https://www.youtube.com/watch?v=WW7ZxaC3OtA)
+[![ERROR DISPLAYING IMAGE, CLICK HERE FOR VIDEO](https://img.youtube.com/vi/K9Rdc848EBs/0.jpg)](https://www.youtube.com/watch?v=K9Rdc848EBs)
 
 ### Repo Contents
 
