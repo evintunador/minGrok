@@ -127,26 +127,28 @@ class Expert(nn.Module):
         return x
 
 class Router(nn.Module):
-    def __init__(self, input_size, tot_num_experts):
+    def __init__(self, input_size, tot_num_experts, noise_std: float = 0.1):
         super().__init__()
         self.tot_num_experts = tot_num_experts
         self.router_weights = nn.Linear(input_size, tot_num_experts, bias=False)
+        self.noise_std = noise_std
 
-    def forward(self, inputs):
+    def forward(self, inputs, training: bool = False):
         routing_logits = self.router_weights(inputs)
+        if training: routing_logits = routing_logits + torch.randn_like(routing_logits) * self.noise_std
         routing_probs = F.softmax(routing_logits, dim=-1)
         return routing_probs
 
 class MoELayer(nn.Module):
-    def __init__(self, model_dim, expert_hidden_dim, tot_num_experts, chosen_num_experts):
+    def __init__(self, model_dim, expert_hidden_dim, tot_num_experts, chosen_num_experts, noise_std):
         super().__init__()
         self.model_dim = model_dim
         self.tot_num_experts = tot_num_experts
         self.chosen_num_experts = chosen_num_experts
         self.experts = nn.ModuleList([Expert(model_dim, expert_hidden_dim) for _ in range(tot_num_experts)])
-        self.router = Router(model_dim, tot_num_experts)
+        self.router = Router(model_dim, tot_num_experts, noise_std)
 
-    def forward(self, inputs):
+    def forward(self, inputs, training: bool = False):
         b, seq_len, _ = inputs.shape
 
         # get the output of all the experts
@@ -165,10 +167,10 @@ class MoELayer(nn.Module):
         output_masked = expert_outputs * multi_hot_expanded.float()
 
         # then weight our experts' outputs by the softmax values (which we first must broadcast to the right shape) and sum them
-        routing_probs = routing_probs.unsqueeze(-1).expand_as(output_masked)
-        MoE_output = (output_masked * routing_probs).sum(dim=2)
+        routing_probs_expanded = routing_probs.unsqueeze(-1).expand_as(output_masked)
+        MoE_output = (output_masked * routing_probs_expanded).sum(dim=2)
 
-        return MoE_output
+        return MoE_output, routing_probs # we also output routing_probs to be used in the loss function later
 
 class RMSNorm(nn.Module): # the same RMSNorm we wrote earlier
     def __init__(self, num_features, eps=1e-5, use_scale=True):
@@ -204,7 +206,8 @@ class DecoderLayer(nn.Module):
             model_dim = config.hidden_size,
             expert_hidden_dim = config.hidden_size * config.embedding_multiplier_scale,
             tot_num_experts = config.tot_num_experts,
-            chosen_num_experts = config.chosen_num_experts
+            chosen_num_experts = config.chosen_num_experts,
+            noise_std = config.noise_std
         )
 
         self.pre_mqa_norm = RMSNorm(config.hidden_size, eps = config.rms_norm_eps, use_scale = config.use_scale)
@@ -217,11 +220,13 @@ class DecoderLayer(nn.Module):
     def forward(self, x: torch.Tensor, training: bool = False) -> torch.Tensor:
         if training:
             x = x + self.drop(self.post_mqa_norm(self.mqa(self.pre_mqa_norm(x))))
-            x = x + self.drop(self.post_moe_norm(self.moe(self.pre_moe_norm(x))))
+            moe_out, routing_probs = self.moe(self.pre_moe_norm(x), training)
+            x = x + self.drop(self.post_moe_norm(moe_out))
         else:
             x = x + self.post_mqa_norm(self.mqa(self.pre_mqa_norm(x)))
-            x = x + self.post_moe_norm(self.moe(self.pre_moe_norm(x)))
-        return x
+            moe_out, routing_probs = self.moe(self.pre_moe_norm(x), training)
+            x = x + self.post_moe_norm(moe_out)
+        return x, routing_probs
 
 class minGrok(nn.Module):
 
@@ -246,22 +251,61 @@ class minGrok(nn.Module):
         # Initialize a normalization layer to be applied after the last decoder layer, stabilizing the output
         self.final_norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
-        # the loss function
+        # the primary loss function
         self.criterion = nn.CrossEntropyLoss()
+    
+        # the hyperparameter weighting the secondary loss function
+        self.lambadada = config.lambadada
+
+    def calc_moe_loss(self, routing_probs_list):
+        # this is silly and inefficient but i'm tired and bored of this project ngl
+        # basically i'm choosing to sum the per-layer MoE variances
+        cum_var = torch.tensor(0.0) # this will be encouraged to be 0 so it doesn't even matter if we record the gradient
+        for routing_probs in routing_probs_list:
+            expert_usage = routing_probs.sum(dim=0)
+            usage_mean = expert_usage.mean()
+            expert_variance = ((expert_usage - usage_mean) ** 2).mean()
+            cum_var = cum_var + expert_variance
+
+        return cum_var
+
+    # a more efficient version ChatGPT4 made that i'm too lazy to test, but go ahead if you want
+    #def calc_moe_loss(self, routing_probs_list):
+        # Concatenate all tensors along a new dimension (say, dim=0)
+        # This results in a new tensor of shape (N, b, t, c) where N is the number of tensors in routing_probs_list
+        #all_routing_probs = torch.cat([x.unsqueeze(0) for x in routing_probs_list], dim=0)
+        
+        # Sum across the batch (b) and time (t) dimensions, resulting in a shape of (N, c)
+        #expert_usage = all_routing_probs.sum(dim=1).sum(dim=1)
+        
+        # Calculate the mean across the new dimension (N) and the experts (c), resulting in a single mean value
+        #usage_mean = expert_usage.mean(dim=0).mean(dim=0)
+        
+        # Calculate the variance
+        #expert_variance = ((expert_usage - usage_mean) ** 2).mean(dim=0).mean(dim=0)
+        
+        # Sum the variance across all layers (N)
+        #cum_var = expert_variance.sum()
+        
+        #return cum_var
 
     def forward(
         self,
         input_token_ids: torch.Tensor, # a shape (batch_size, input_seq_len) list of integer token ids
         target_token_ids: torch.Tensor = None, # a shape (batch_size, input_seq_len) list of token ids to train on
         ) -> torch.Tensor:
+        training = False if target_token_ids is None else True
 
         # turn the input tokens into the first resudial state using the embedding matrix
         x = self.embedder(input_token_ids) * self.config.hidden_size**0.5 # Grok normalizes the embedding by sqrt(hidden_size)
 
+        # initialize a list to store the routing probs of each layer in
+        routing_probs_list = []
         # Iteratively process the input through each DecoderLayer
         for i in range(len(self.layers)):
             layer = self.layers[i]
-            x = layer(x, training=True) if target_token_ids is not None else layer(x, training=False)
+            x, routing_probs = layer(x, training)
+            if training: routing_probs_list.append(routing_probs)
 
         # Apply normalization to the output of the final decoder layer
         x = self.final_norm(x)
@@ -274,14 +318,20 @@ class minGrok(nn.Module):
         # (batch_size, input_len, hidden_size) @ (hidden_size, vocab_size) -> (batch_size, input_len, vocab_size)
         logits = torch.matmul(x, embedder_weight.t())
 
-        if target_token_ids is None: # if we're not training, then we don't need to calculate loss
-            loss = None
-        else:
-            # if we are training
+        if training: # if we are training
             batch_size, input_len, vocab_size = logits.shape
-            # then we reshape our logits & targets before calculating cross-entropy loss
-            loss = self.criterion(logits.view(batch_size*input_len, vocab_size),
-                                  target_token_ids.view(batch_size*input_len))
+
+            # we reshape our logits & targets before calculating cross-entropy loss
+            CEloss = self.criterion(logits.view(batch_size*input_len, vocab_size),
+                                    target_token_ids.view(batch_size*input_len))
+            
+            # calculating the MoE loss that encourages all experts to be utilized
+            MoEloss = self.calc_moe_loss(routing_probs_list)
+
+            # our final loss value
+            loss = CEloss + MoEloss * self.lambadada
+        else:
+            loss = None # if we're not training, then we don't need to calculate loss
 
         return logits, loss
 

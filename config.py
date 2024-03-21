@@ -8,7 +8,7 @@ from typing import Optional
 from tokenizer import *
 
 ### BASE 
-@dataclasses.dataclass # a class meant specifically to just hold data
+@dataclasses.dataclass
 class Config:
     # v was defined earlier when we loaded TinyShakespeare. In Grok it's 131,072
     vocab_size: int = tokenizer.vocab_len
@@ -16,7 +16,7 @@ class Config:
     # The maximum sequence length that this model might ever be used with.
     max_position_embeddings: int = 256 # in Grok it's 8,192
 
-    # The number of blocks in the model.
+    # The number of layers in the model.
     num_layers: int = 4 # In Grok it's 64
 
     # The number of attention heads used in the attention layers of the model.
@@ -29,13 +29,20 @@ class Config:
     hidden_size: int = 96 # In Grok it's 6,144
 
     # How much wider should the inner dimension of the experts be than the model's embedding dimension?
-    embedding_multiplier_scale: int = 2 # In Grok it's 8 
+    embedding_multiplier_scale: int = 2 # In Grok it's roughly 5.33
 
     # how many experts?
     tot_num_experts: int = 4 # in Grok it's 8
 
     # how many active experts per token?
     chosen_num_experts: int = 2 # in Grok it's also 2
+
+    # what amount of noise should be injected into the router during training?
+    noise_std = 0.1 # the value for Grok has not been shared
+
+    # When we create a loss to encourage all experts to be used, how should that loss be weighted?
+    lambadada = 10 # Grok's value has not been shared
+    # excuse my silly naming
 
     # The number of head dimensions
     head_dim: int = 24 # In Grok it's 128
