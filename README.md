@@ -14,6 +14,9 @@ This repo is meant as a guide to how XAI's newly open-sourced model Grok-1 works
 - `input.txt` - just [TinyShakespeare](https://github.com/karpathy/char-rnn/blob/master/data/tinyshakespeare/input.txt). If i wasn't so lazy I would've set all this code to download it directly rather than actually storing a copy in this repo
 - `models/` - a folder of 1m parameter model(s) that i trained on my macbook air. Again don't expect anything impressive, they're just here for teaching purposes so that you can load them rather than training your own. If you train something bigger feel free to upload I guess, but stick with my lazy practice of designating hyperparameters in the title
 
+### ToDo
+- [ ] A commenter pointed out my lack of inclusion of MoE specific training dynamics. Basically in order to encourage proper expert utilization rather than over-reliance on one expert, you need to both add randomness to the Router's logits and add a diversity loss to ensure every expert is used in every batch. The video will not be changing but fingers crossed I'll be able update the code today. Should be a good little test if you've actually read the code.
+
 ### Check out my socials
 - [Youtube](https://www.youtube.com/channel/UCeQhm8DwHBg_YEYY0KGM1GQ)
 - [Linkedin](https://tr.ee/HgIcstKnBX)
